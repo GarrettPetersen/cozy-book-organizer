@@ -2,24 +2,26 @@
 
 ## Architecture
 
-Start as a browser game, then package the same renderer with Electron once the interaction loop is worth shipping. Keep the simulation independent from the UI so the customer-search rules can be tested and tuned without tying them to React.
+Start as a browser game, then package the same renderer with Electron or Tauri once the interaction loop is worth shipping. Keep the simulation independent from the renderer so customer-search rules can be tested and tuned without tying them to Phaser.
 
-- `src/game/types.ts`: plain domain types for books, customers, and the shop state.
+- `src/game/types.ts`: plain domain types for books, customers, and shop state.
 - `src/game/catalog.ts`: sample content and authored starting inventory.
 - `src/game/simulation.ts`: pure state transitions for stocking, customer searches, opening, and day changes.
-- `src/ui/App.tsx`: event wiring and scene composition; later replace the CSS scene with a canvas/SVG scene without rewriting game rules.
-- `src/ui/styles.css`: graybox-inspired visual language and responsive layout.
+- `src/scenes/BookstoreScene.ts`: Phaser scene composition, Matter rigid bodies, shelf snap zones, unified mouse/touch input, and cover inspection.
+- `src/main.ts`: renderer, physics, and responsive scaling configuration.
+- `src/ui/styles.css`: canvas host sizing only; scene visuals belong in Phaser so every platform uses one coordinate system.
+
+The scene uses a fixed 1000 × 650 game world and scales it to the browser. This keeps physics deterministic and gives future scanned ink assets stable anchor points. Mobile landscape is the primary phone layout; portrait preserves the full room with letterboxing. Matter bodies drive loose books, while shelved books become static bodies at authored snap points.
 
 For the next phase, keep one authoritative `GameState` and advance it through explicit actions. Use stable IDs for content and save a versioned JSON snapshot through a small persistence adapter (`localStorage` for browser prototype, Electron filesystem save adapter later). Avoid adding a backend or ECS until simulation complexity demands it. For hand-painted assets, use a manifest keyed by semantic asset IDs and keep dimensions/anchor points consistent; the sprite renderer can swap an image for each current geometric placeholder.
 
-## First playable loop
+## Current interaction slice
 
-1. Drag books between the shelf and floor pile; double-click a book to inspect its cover, title, author, and genre.
-2. Open the store. Up to three readers arrive with incomplete clues.
-3. Select a reader, then click a shelf book to have them examine it. Matching books sell; misses reveal genre-adjacent thinking.
-4. Close the shop and use the till for a shelf upgrade. End the day to start again.
+1. Loose books fall, collide, rotate, and settle into a pile as Matter rigid bodies.
+2. Drag a book into an open shelf position to snap it into place; drag it out again to return it to physics.
+3. Double-click or double-tap any book to inspect its front cover, then click the cover close mark or white backdrop to return.
 
-The prototype is deliberately forgiving: there is no loss state, and inventory is replenished as the initial catalog for repeated interaction. Search currently responds to the player choosing a shelf position rather than autonomous time-based movement; this makes the core inference legible while the arrangement mechanic is evaluated.
+The pure customer-search and day-state transitions remain in `src/game/simulation.ts`, but the rebuilt scene does not yet connect them to characters. The next gameplay layer should let NPC systems request scene actions through a small adapter instead of putting search logic inside the Phaser scene.
 
 ## Asset log
 
@@ -27,17 +29,16 @@ Graybox inventory to hand-paint and scan, with geometric or CSS stand-ins until 
 
 | Asset ID | Description | State |
 |---|---|---|
-| `book.spine` | Colored spine, title glyphs, small publisher mark | CSS graybox |
-| `book.cover` | Front cover block with title/author placement | CSS graybox |
-| `furniture.shelf` | Shelf boards, uprights, feet | CSS graybox |
-| `furniture.counter` | Checkout counter and register | CSS graybox |
-| `prop.register` | Register body, display, drawer | CSS graybox |
-| `architecture.wall` | Paper wall, trim, small wall sign | CSS graybox |
-| `architecture.floor` | Floor line and plank seams | CSS graybox |
-| `architecture.window` | Window crossbars, sill, painted light | CSS graybox |
-| `character.heads` | Four head/hair silhouettes | CSS graybox |
-| `character.bodies` | Four body silhouettes/clothing shapes | CSS graybox |
-| `character.idle` | Customer standing and browsing | CSS graybox |
+| `book.spine` | Colored spine and title glyphs | Phaser graybox |
+| `book.cover` | Front cover block and title placement | Phaser graybox |
+| `furniture.shelf` | Shelf boards, uprights, feet | Phaser graybox |
+| `furniture.counter` | Checkout counter and register | Phaser graybox |
+| `prop.register` | Register body, display, drawer | Phaser graybox |
+| `architecture.wall` | Paper wall and room outline | Phaser graybox |
+| `architecture.floor` | Floor line | Phaser graybox |
+| `character.heads` | Clerk and customer head silhouettes | Phaser graybox |
+| `character.bodies` | Clerk and customer body silhouettes | Phaser graybox |
+| `character.idle` | Customer standing pose | Phaser graybox |
 | `character.walk` | Customer moving between shelf and door | Not built |
 | `character.examine` | Customer holding/reading a book | Not built |
 | `character.checkout` | Cashier scanning a book | Not built |
