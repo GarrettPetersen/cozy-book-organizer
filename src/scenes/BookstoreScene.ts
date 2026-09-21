@@ -22,7 +22,6 @@ type BookVisual = {
   row: number | null;
   column: number | null;
   shelfAngle: number;
-  shelfAngularVelocity: number;
   shelfTargetAngle: number;
   shelfBaseX: number;
   shelfBoardY: number;
@@ -223,7 +222,6 @@ export class BookstoreScene extends Phaser.Scene {
         row: null,
         column: null,
         shelfAngle: 0,
-        shelfAngularVelocity: 0,
         shelfTargetAngle: 0,
         shelfBaseX: 0,
         shelfBoardY: 0,
@@ -357,8 +355,7 @@ export class BookstoreScene extends Phaser.Scene {
     this.shelfRows[target.row] = rowWithGap;
     book.row = target.row;
     book.column = target.index;
-    book.shelfAngle = Phaser.Math.Clamp(releaseVelocityX * 0.012, -6, 6);
-    book.shelfAngularVelocity = Phaser.Math.Clamp(releaseVelocityX * 0.025, -16, 16);
+    book.shelfAngle = Phaser.Math.Clamp(releaseVelocityX * 0.006, -3, 3);
     book.sprite.setStatic(true);
     book.sprite.setIgnoreGravity(true);
     book.sprite.setVelocity(0, 0);
@@ -416,15 +413,13 @@ export class BookstoreScene extends Phaser.Scene {
 
   private updateShelfPhysics(delta: number) {
     const step = Math.min(delta / 1000, 0.04);
+    const settle = 1 - Math.exp(-13 * step);
     this.books.forEach(book => {
       if (book.row === null) return;
       const error = book.shelfTargetAngle - book.shelfAngle;
-      book.shelfAngularVelocity += error * 72 * step;
-      book.shelfAngularVelocity *= Math.exp(-8.5 * step);
-      book.shelfAngle += book.shelfAngularVelocity * step;
-      if (Math.abs(error) < 0.015 && Math.abs(book.shelfAngularVelocity) < 0.03) {
+      book.shelfAngle += error * settle;
+      if (Math.abs(error) < 0.025) {
         book.shelfAngle = book.shelfTargetAngle;
-        book.shelfAngularVelocity = 0;
       }
 
       const lean = Phaser.Math.DegToRad(book.shelfAngle);
@@ -433,7 +428,7 @@ export class BookstoreScene extends Phaser.Scene {
       const halfThickness = BOOK_HEIGHT / 2;
       const lowestCorner = Math.abs(Math.sin(angle)) * halfWidth + Math.abs(Math.cos(angle)) * halfThickness;
       book.sprite.setPosition(
-        book.shelfBaseX - Math.sin(lean) * halfWidth,
+        book.shelfBaseX - Math.sin(lean) * halfWidth * 0.55,
         book.shelfBoardY - lowestCorner,
       );
       book.sprite.setAngle(-90 + book.shelfAngle);
