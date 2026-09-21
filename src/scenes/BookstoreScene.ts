@@ -51,20 +51,7 @@ export class BookstoreScene extends Phaser.Scene {
     ink.setDepth(0);
     ink.lineStyle(7, INK, 1);
 
-    ink.beginPath();
-    ink.moveTo(132, 514);
-    ink.lineTo(132, 116);
-    ink.lineTo(145, 127);
-    ink.lineTo(334, 127);
-    ink.lineTo(384, 109);
-    ink.lineTo(455, 112);
-    ink.lineTo(508, 121);
-    ink.lineTo(578, 140);
-    ink.lineTo(701, 140);
-    ink.lineTo(679, 166);
-    ink.lineTo(660, 279);
-    ink.lineTo(660, 509);
-    ink.strokePath();
+    ink.strokeRect(132, 116, 736, 407);
 
     ink.lineStyle(8, INK, 1);
     ink.beginPath();
@@ -182,8 +169,9 @@ export class BookstoreScene extends Phaser.Scene {
   private createBoundaries() {
     const wallOptions = { isStatic: true, friction: 0.9, restitution: 0.08, render: { visible: false } };
     this.matter.add.rectangle(500, 532, 1000, 20, wallOptions);
+    this.matter.add.rectangle(500, 106, 736, 20, wallOptions);
     this.matter.add.rectangle(122, 325, 20, 420, wallOptions);
-    this.matter.add.rectangle(902, 325, 20, 420, wallOptions);
+    this.matter.add.rectangle(878, 325, 20, 420, wallOptions);
   }
 
   private createBooks() {
@@ -260,7 +248,10 @@ export class BookstoreScene extends Phaser.Scene {
     this.input.on('drag', (_pointer: Phaser.Input.Pointer, object: Phaser.GameObjects.GameObject, x: number, y: number) => {
       const sprite = object as Phaser.Physics.Matter.Image;
       if (!sprite.getData('bookId') || this.coverLayer) return;
-      sprite.setPosition(x, y);
+      sprite.setPosition(
+        Phaser.Math.Clamp(x, 132 + BOOK_WIDTH / 2, 868 - BOOK_WIDTH / 2),
+        Phaser.Math.Clamp(y, 116 + BOOK_HEIGHT / 2, 523 - BOOK_HEIGHT / 2),
+      );
     });
 
     this.input.on('dragend', (pointer: Phaser.Input.Pointer, object: Phaser.GameObjects.GameObject) => {
