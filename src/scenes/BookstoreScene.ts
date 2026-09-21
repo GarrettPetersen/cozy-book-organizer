@@ -21,6 +21,11 @@ type BookVisual = {
   title: Phaser.GameObjects.Text;
   row: number | null;
   column: number | null;
+  shelfAngle: number;
+  shelfAngularVelocity: number;
+  shelfTargetAngle: number;
+  shelfBaseX: number;
+  shelfBoardY: number;
 };
 
 type ShelfTarget = { row: number; index: number };
@@ -51,7 +56,8 @@ export class BookstoreScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-ESC', () => this.closeCover());
   }
 
-  update() {
+  update(_time: number, delta: number) {
+    this.updateShelfPhysics(delta);
     this.books.forEach(book => {
       book.title.setPosition(book.sprite.x, book.sprite.y);
       book.title.setRotation(book.sprite.rotation);
@@ -197,7 +203,7 @@ export class BookstoreScene extends Phaser.Scene {
       sprite.setAngle([-7, 4, -3, 8][index % 4]);
       sprite.setDepth(5);
       sprite.setData('bookId', book.id);
-      sprite.setInteractive(new Phaser.Geom.Rectangle(-8, -12, BOOK_WIDTH + 16, BOOK_HEIGHT + 24), Phaser.Geom.Rectangle.Contains);
+      sprite.setInteractive();
       this.input.setDraggable(sprite);
 
       const title = this.add.text(sprite.x, sprite.y, book.title, {
@@ -210,7 +216,18 @@ export class BookstoreScene extends Phaser.Scene {
       const titleScale = Math.min(1, (BOOK_WIDTH - 14) / title.width, (BOOK_HEIGHT - 7) / title.height);
       title.setScale(titleScale);
 
-      this.books.set(book.id, { data: book, sprite, title, row: null, column: null });
+      this.books.set(book.id, {
+        data: book,
+        sprite,
+        title,
+        row: null,
+        column: null,
+        shelfAngle: 0,
+        shelfAngularVelocity: 0,
+        shelfTargetAngle: 0,
+        shelfBaseX: 0,
+        shelfBoardY: 0,
+      });
     });
   }
 
@@ -266,7 +283,7 @@ export class BookstoreScene extends Phaser.Scene {
       if (!book) return;
       const target = this.shelfTarget(sprite.x, sprite.y);
       if (target) {
-        this.shelve(book, target);
+        this.shelve(book, target, pointer.velocity.x);
       } else {
         this.layoutShelf();
         sprite.setStatic(false);
@@ -333,18 +350,19 @@ export class BookstoreScene extends Phaser.Scene {
     return { row, index };
   }
 
-  private shelve(book: BookVisual, target: ShelfTarget) {
+  private shelve(book: BookVisual, target: ShelfTarget, releaseVelocityX: number) {
     const rowWithGap = this.rowWithGap(target.row, target.index);
     if (!rowWithGap) return;
     rowWithGap[target.index] = book.data.id;
     this.shelfRows[target.row] = rowWithGap;
     book.row = target.row;
     book.column = target.index;
+    book.shelfAngle = Phaser.Math.Clamp(releaseVelocityX * 0.012, -6, 6);
+    book.shelfAngularVelocity = Phaser.Math.Clamp(releaseVelocityX * 0.025, -16, 16);
     book.sprite.setStatic(true);
     book.sprite.setIgnoreGravity(true);
     book.sprite.setVelocity(0, 0);
     book.sprite.setAngularVelocity(0);
-    book.sprite.setAngle(-90);
     book.sprite.setDepth(5);
     this.layoutShelf();
   }
@@ -378,11 +396,62 @@ export class BookstoreScene extends Phaser.Scene {
         book.row = row;
         book.column = column;
       }
-      const emptyLeft = column > 0 && arrangement[column - 1] === null;
-      const emptyRight = column < SHELF_CAPACITY - 1 && arrangement[column + 1] === null;
-      const lean = emptyLeft === emptyRight ? 0 : emptyLeft ? -5 : 5;
-      book.sprite.setPosition(SHELF_FIRST_X + column * SHELF_PITCH, SHELF_ROWS[row].y);
-      book.sprite.setAngle(-90 + lean);
+      book.shelfBaseX = SHELF_FIRST_X + column * SHELF_PITCH;
+      book.shelfBoardY = SHELF_ROWS[row].bottom;
+      book.shelfTargetAngle = this.supportedLean(arrangement, column, id);
+    });
+  }
+
+  private supportedLean(arrangement: Array<string | null>, column: number, id: string) {
+    const gapLeft = column > 0 && arrangement[column - 1] === null;
+    const gapRight = column < SHELF_CAPACITY - 1 && arrangement[column + 1] === null;
+    if (!gapLeft && !gapRight) return 0;
+
+    const leftLean = gapLeft ? this.supportedLeanMagnitude(arrangement, column, -1) : Number.POSITIVE_INFINITY;
+    const rightLean = gapRight ? this.supportedLeanMagnitude(arrangement, column, 1) : Number.POSITIVE_INFINITY;
+    if (leftLean === rightLean) return this.bookDirection(id) * leftLean;
+    if (leftLean < rightLean) return -leftLean;
+    if (rightLean < leftLean) return rightLean;
+    return 0;
+  }
+
+  private supportedLeanMagnitude(arrangement: Array<string | null>, column: number, direction: -1 | 1) {
+    let gaps = 0;
+    let support = column + direction;
+    while (support >= 0 && support < SHELF_CAPACITY && arrangement[support] === null) {
+      gaps += 1;
+      support += direction;
+    }
+
+    const hasBookSupport = support >= 0 && support < SHELF_CAPACITY;
+    const openWidth = gaps * SHELF_PITCH * (hasBookSupport ? 0.5 : 1);
+    const contactAngle = Phaser.Math.RadToDeg(Math.asin(Math.min(0.97, openWidth / BOOK_WIDTH)));
+    return Math.min(76, Math.max(4, contactAngle));
+  }
+
+  private bookDirection(id: string) {
+    return [...id].reduce((total, character) => total + character.charCodeAt(0), 0) % 2 === 0 ? -1 : 1;
+  }
+
+  private updateShelfPhysics(delta: number) {
+    const step = Math.min(delta / 1000, 0.04);
+    this.books.forEach(book => {
+      if (book.row === null) return;
+      const error = book.shelfTargetAngle - book.shelfAngle;
+      book.shelfAngularVelocity += error * 72 * step;
+      book.shelfAngularVelocity *= Math.exp(-8.5 * step);
+      book.shelfAngle += book.shelfAngularVelocity * step;
+      if (Math.abs(error) < 0.015 && Math.abs(book.shelfAngularVelocity) < 0.03) {
+        book.shelfAngle = book.shelfTargetAngle;
+        book.shelfAngularVelocity = 0;
+      }
+
+      const angle = Phaser.Math.DegToRad(-90 + book.shelfAngle);
+      book.sprite.setPosition(
+        book.shelfBaseX + Math.cos(angle) * BOOK_WIDTH / 2,
+        book.shelfBoardY + Math.sin(angle) * BOOK_WIDTH / 2,
+      );
+      book.sprite.setAngle(-90 + book.shelfAngle);
     });
   }
 
