@@ -6,19 +6,32 @@ const INK = 0x302631;
 const PAPER = 0xffffff;
 const BOOK_WIDTH = 92;
 const BOOK_HEIGHT = 22;
+const SHELF_FIRST_X = 410;
+const SHELF_PITCH = BOOK_HEIGHT;
+const SHELF_CAPACITY = 11;
+const SHELF_ROWS = [
+  { top: 164, bottom: 281, y: 233 },
+  { top: 281, bottom: 392, y: 344 },
+  { top: 392, bottom: 505, y: 457 },
+];
 
-type ShelfSlot = { x: number; y: number; bookId: string | null };
 type BookVisual = {
   data: Book;
   sprite: Phaser.Physics.Matter.Image;
   title: Phaser.GameObjects.Text;
-  slot: number | null;
+  row: number | null;
+  column: number | null;
 };
+
+type ShelfTarget = { row: number; index: number };
 
 export class BookstoreScene extends Phaser.Scene {
   private books = new Map<string, BookVisual>();
-  private slots: ShelfSlot[] = [];
-  private slotGuides!: Phaser.GameObjects.Graphics;
+  private shelfRows: Array<Array<string | null>> = Array.from(
+    { length: SHELF_ROWS.length },
+    () => Array<string | null>(SHELF_CAPACITY).fill(null),
+  );
+  private shelfGuide!: Phaser.GameObjects.Graphics;
   private activeDrag: string | null = null;
   private pointerDown = new Map<string, { x: number; y: number; time: number }>();
   private lastTap = new Map<string, number>();
@@ -31,7 +44,7 @@ export class BookstoreScene extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor(PAPER);
     this.drawRoom();
-    this.createShelfSlots();
+    this.shelfGuide = this.add.graphics().setDepth(19);
     this.createBoundaries();
     this.createBooks();
     this.bindInput();
@@ -154,18 +167,6 @@ export class BookstoreScene extends Phaser.Scene {
     ink.strokePath();
   }
 
-  private createShelfSlots() {
-    const xs = [415, 473, 531, 589];
-    const ys = [232, 343, 456];
-    ys.forEach(y => xs.forEach(x => this.slots.push({ x, y, bookId: null })));
-
-    this.slotGuides = this.add.graphics().setDepth(3).setVisible(false);
-    this.slots.forEach(slot => {
-      this.slotGuides.lineStyle(2, INK, 0.18);
-      this.slotGuides.strokeRoundedRect(slot.x - 17, slot.y - 49, 34, 98, 3);
-    });
-  }
-
   private createBoundaries() {
     const wallOptions = { isStatic: true, friction: 0.9, restitution: 0.08, render: { visible: false } };
     this.matter.add.rectangle(500, 532, 1000, 20, wallOptions);
@@ -205,10 +206,11 @@ export class BookstoreScene extends Phaser.Scene {
         fontStyle: 'bold',
         color: '#302631',
         align: 'center',
-        fixedWidth: 82,
       }).setOrigin(0.5).setDepth(6);
+      const titleScale = Math.min(1, (BOOK_WIDTH - 14) / title.width, (BOOK_HEIGHT - 7) / title.height);
+      title.setScale(titleScale);
 
-      this.books.set(book.id, { data: book, sprite, title, slot: null });
+      this.books.set(book.id, { data: book, sprite, title, row: null, column: null });
     });
   }
 
@@ -242,7 +244,7 @@ export class BookstoreScene extends Phaser.Scene {
       sprite.setAngularVelocity(0);
       sprite.setAngle(0);
       sprite.setDepth(20);
-      this.slotGuides.setVisible(true);
+      this.shelfGuide.clear();
     });
 
     this.input.on('drag', (_pointer: Phaser.Input.Pointer, object: Phaser.GameObjects.GameObject, x: number, y: number) => {
@@ -252,6 +254,8 @@ export class BookstoreScene extends Phaser.Scene {
         Phaser.Math.Clamp(x, 132 + BOOK_WIDTH / 2, 868 - BOOK_WIDTH / 2),
         Phaser.Math.Clamp(y, 116 + BOOK_HEIGHT / 2, 523 - BOOK_HEIGHT / 2),
       );
+      const target = this.shelfTarget(sprite.x, sprite.y);
+      this.previewShelf(target);
     });
 
     this.input.on('dragend', (pointer: Phaser.Input.Pointer, object: Phaser.GameObjects.GameObject) => {
@@ -260,12 +264,14 @@ export class BookstoreScene extends Phaser.Scene {
       if (!id) return;
       const book = this.books.get(id);
       if (!book) return;
-      const slotIndex = this.nearestOpenSlot(sprite.x, sprite.y);
-      if (slotIndex !== null) {
-        this.shelve(book, slotIndex);
+      const target = this.shelfTarget(sprite.x, sprite.y);
+      if (target) {
+        this.shelve(book, target);
       } else {
+        this.layoutShelf();
         sprite.setStatic(false);
         sprite.setIgnoreGravity(false);
+        sprite.setAwake();
         sprite.setVelocity(
           Phaser.Math.Clamp(pointer.velocity.x * 0.08, -7, 7),
           Phaser.Math.Clamp(pointer.velocity.y * 0.08, -5, 7),
@@ -274,7 +280,7 @@ export class BookstoreScene extends Phaser.Scene {
         sprite.setDepth(5);
       }
       this.activeDrag = null;
-      this.slotGuides.setVisible(false);
+      this.shelfGuide.clear();
     });
 
     this.books.forEach(book => {
@@ -298,36 +304,98 @@ export class BookstoreScene extends Phaser.Scene {
   }
 
   private unshelve(book: BookVisual) {
-    if (book.slot === null) return;
-    this.slots[book.slot].bookId = null;
-    book.slot = null;
+    if (book.row === null) return;
+    const row = book.row;
+    const column = this.shelfRows[row].indexOf(book.data.id);
+    if (column >= 0) this.shelfRows[row][column] = null;
+    book.row = null;
+    book.column = null;
+    this.layoutRow(row);
   }
 
-  private nearestOpenSlot(x: number, y: number) {
-    let best: number | null = null;
-    let bestDistance = 76;
-    this.slots.forEach((slot, index) => {
-      if (slot.bookId) return;
-      const distance = Phaser.Math.Distance.Between(x, y, slot.x, slot.y);
-      if (distance < bestDistance) {
-        best = index;
-        bestDistance = distance;
+  private shelfTarget(x: number, y: number): ShelfTarget | null {
+    if (x < 380 || x > 640) return null;
+    const row = SHELF_ROWS.findIndex(bounds => y >= bounds.top && y < bounds.bottom);
+    if (row < 0 || !this.shelfRows[row].includes(null)) return null;
+    let lastBook = -1;
+    for (let column = SHELF_CAPACITY - 1; column >= 0; column -= 1) {
+      if (this.shelfRows[row][column] !== null) {
+        lastBook = column;
+        break;
       }
-    });
-    return best;
+    }
+    const rightmostInsertion = Math.min(SHELF_CAPACITY - 1, lastBook + 1);
+    const index = Phaser.Math.Clamp(
+      Math.round((x - SHELF_FIRST_X) / SHELF_PITCH),
+      0,
+      rightmostInsertion,
+    );
+    return { row, index };
   }
 
-  private shelve(book: BookVisual, slotIndex: number) {
-    const slot = this.slots[slotIndex];
-    slot.bookId = book.data.id;
-    book.slot = slotIndex;
+  private shelve(book: BookVisual, target: ShelfTarget) {
+    const rowWithGap = this.rowWithGap(target.row, target.index);
+    if (!rowWithGap) return;
+    rowWithGap[target.index] = book.data.id;
+    this.shelfRows[target.row] = rowWithGap;
+    book.row = target.row;
+    book.column = target.index;
     book.sprite.setStatic(true);
     book.sprite.setIgnoreGravity(true);
     book.sprite.setVelocity(0, 0);
     book.sprite.setAngularVelocity(0);
-    book.sprite.setPosition(slot.x, slot.y);
     book.sprite.setAngle(-90);
     book.sprite.setDepth(5);
+    this.layoutShelf();
+  }
+
+  private previewShelf(target: ShelfTarget | null) {
+    this.shelfGuide.clear();
+    this.layoutShelf();
+    if (!target) return;
+    const preview = this.rowWithGap(target.row, target.index);
+    if (!preview) return;
+    this.layoutRow(target.row, preview, false);
+    const markerX = SHELF_FIRST_X + target.index * SHELF_PITCH - SHELF_PITCH / 2;
+    const row = SHELF_ROWS[target.row];
+    this.shelfGuide.lineStyle(3, INK, 0.32);
+    this.shelfGuide.beginPath();
+    this.shelfGuide.moveTo(markerX, row.y - BOOK_WIDTH / 2);
+    this.shelfGuide.lineTo(markerX, row.y + BOOK_WIDTH / 2);
+    this.shelfGuide.strokePath();
+  }
+
+  private layoutShelf() {
+    this.shelfRows.forEach((_books, row) => this.layoutRow(row));
+  }
+
+  private layoutRow(row: number, arrangement = this.shelfRows[row], updateLocation = true) {
+    arrangement.forEach((id, column) => {
+      if (!id) return;
+      const book = this.books.get(id);
+      if (!book) return;
+      if (updateLocation) {
+        book.row = row;
+        book.column = column;
+      }
+      const emptyLeft = column > 0 && arrangement[column - 1] === null;
+      const emptyRight = column < SHELF_CAPACITY - 1 && arrangement[column + 1] === null;
+      const lean = emptyLeft === emptyRight ? 0 : emptyLeft ? -5 : 5;
+      book.sprite.setPosition(SHELF_FIRST_X + column * SHELF_PITCH, SHELF_ROWS[row].y);
+      book.sprite.setAngle(-90 + lean);
+    });
+  }
+
+  private rowWithGap(row: number, index: number) {
+    const arrangement = [...this.shelfRows[row]];
+    if (arrangement[index] === null) return arrangement;
+    const openColumn = arrangement.findIndex((id, column) => column >= index && id === null);
+    if (openColumn < 0) return null;
+    for (let column = openColumn; column > index; column -= 1) {
+      arrangement[column] = arrangement[column - 1];
+    }
+    arrangement[index] = null;
+    return arrangement;
   }
 
   private openCover(book: BookVisual) {

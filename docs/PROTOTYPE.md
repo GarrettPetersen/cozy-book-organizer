@@ -7,18 +7,18 @@ Start as a browser game, then package the same renderer with Electron or Tauri o
 - `src/game/types.ts`: plain domain types for books, customers, and shop state.
 - `src/game/catalog.ts`: sample content and authored starting inventory.
 - `src/game/simulation.ts`: pure state transitions for stocking, customer searches, opening, and day changes.
-- `src/scenes/BookstoreScene.ts`: Phaser scene composition, Matter rigid bodies, shelf snap zones, unified mouse/touch input, and cover inspection.
+- `src/scenes/BookstoreScene.ts`: Phaser scene composition, Matter rigid bodies, packed shelf rows, unified mouse/touch input, and cover inspection.
 - `src/main.ts`: renderer, physics, and responsive scaling configuration.
 - `src/ui/styles.css`: canvas host sizing only; scene visuals belong in Phaser so every platform uses one coordinate system.
 
-The scene uses a fixed 1000 × 650 game world and scales it to the browser. This keeps physics deterministic and gives future scanned ink assets stable anchor points. Mobile landscape is the primary phone layout; portrait preserves the full room with letterboxing. Matter bodies drive loose books, while shelved books become static bodies at authored snap points.
+The scene uses a fixed 1000 × 650 game world and scales it to the browser. This keeps physics deterministic and gives future scanned ink assets stable anchor points. Mobile landscape is the primary phone layout; portrait preserves the full room with letterboxing. Matter bodies drive loose books. Shelved books pack against the left side as they are added, but removing a book preserves its gap. Dropping between two spines inserts the book and shifts the books to its right; spines next to gaps can lean slightly into the open space.
 
 For the next phase, keep one authoritative `GameState` and advance it through explicit actions. Use stable IDs for content and save a versioned JSON snapshot through a small persistence adapter (`localStorage` for browser prototype, Electron filesystem save adapter later). Avoid adding a backend or ECS until simulation complexity demands it. For hand-painted assets, use a manifest keyed by semantic asset IDs and keep dimensions/anchor points consistent; the sprite renderer can swap an image for each current geometric placeholder.
 
 ## Current interaction slice
 
 1. Loose books fall, collide, rotate, and settle into a pile as Matter rigid bodies.
-2. Drag a book into an open shelf position to snap it into place; drag it out again to return it to physics.
+2. Drag a book onto a shelf row to insert it among the packed spines; drag it out again to restore gravity and rigid-body physics.
 3. Double-click or double-tap any book to inspect its front cover, then click the cover close mark or white backdrop to return.
 
 The pure customer-search and day-state transitions remain in `src/game/simulation.ts`, but the rebuilt scene does not yet connect them to characters. The next gameplay layer should let NPC systems request scene actions through a small adapter instead of putting search logic inside the Phaser scene.
