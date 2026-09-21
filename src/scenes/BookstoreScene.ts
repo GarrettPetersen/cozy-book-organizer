@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { startingBooks } from '../game/catalog';
 import type { Book } from '../game/types';
+import { PaperCharacter } from './PaperCharacter';
 
 const INK = 0x302631;
 const PAPER = 0xffffff;
@@ -25,9 +26,11 @@ type BookVisual = {
   shelfTargetAngle: number;
   shelfBaseX: number;
   shelfBoardY: number;
+  titleScale: number;
 };
 
 type ShelfTarget = { row: number; index: number };
+type CustomerPhase = 'waiting' | 'entering' | 'searching' | 'checkout-walk' | 'checkout' | 'leaving' | 'done';
 
 export class BookstoreScene extends Phaser.Scene {
   private books = new Map<string, BookVisual>();
@@ -40,6 +43,13 @@ export class BookstoreScene extends Phaser.Scene {
   private pointerDown = new Map<string, { x: number; y: number; time: number }>();
   private lastTap = new Map<string, number>();
   private coverLayer: Phaser.GameObjects.Container | null = null;
+  private clerk!: PaperCharacter;
+  private visitor!: PaperCharacter;
+  private customerPhase: CustomerPhase = 'waiting';
+  private customerPhaseTime = 0;
+  private customerTargetId: string | null = null;
+  private carriedBookId: string | null = null;
+  private checkoutMarks!: Phaser.GameObjects.Graphics;
 
   constructor() {
     super('bookstore');
@@ -51,12 +61,14 @@ export class BookstoreScene extends Phaser.Scene {
     this.shelfGuide = this.add.graphics().setDepth(19);
     this.createBoundaries();
     this.createBooks();
+    this.createCharacters();
     this.bindInput();
     this.input.keyboard?.on('keydown-ESC', () => this.closeCover());
   }
 
   update(_time: number, delta: number) {
     this.updateShelfPhysics(delta);
+    this.updateCharacters(delta);
     this.books.forEach(book => {
       book.title.setPosition(book.sprite.x, book.sprite.y);
       book.title.setRotation(book.sprite.rotation);
@@ -83,9 +95,8 @@ export class BookstoreScene extends Phaser.Scene {
     ink.strokePath();
 
     this.drawCounter(ink);
-    this.drawClerk(ink);
-    this.drawCustomer(ink);
     this.drawShelf(ink);
+    this.drawDoor(ink);
   }
 
   private drawCounter(ink: Phaser.GameObjects.Graphics) {
@@ -106,55 +117,6 @@ export class BookstoreScene extends Phaser.Scene {
     ink.strokeRect(263, 366, 31, 11);
   }
 
-  private drawClerk(ink: Phaser.GameObjects.Graphics) {
-    ink.lineStyle(6, INK, 1);
-    ink.strokeEllipse(201, 313, 39, 55);
-    ink.beginPath();
-    ink.moveTo(184, 323);
-    ink.lineTo(190, 301);
-    ink.lineTo(210, 296);
-    ink.lineTo(222, 317);
-    ink.moveTo(194, 341);
-    ink.lineTo(194, 421);
-    ink.lineTo(229, 421);
-    ink.lineTo(229, 360);
-    ink.moveTo(196, 368);
-    ink.lineTo(167, 348);
-    ink.lineTo(151, 374);
-    ink.lineTo(181, 399);
-    ink.moveTo(151, 374);
-    ink.lineTo(142, 369);
-    ink.moveTo(151, 374);
-    ink.lineTo(142, 382);
-    ink.strokePath();
-  }
-
-  private drawCustomer(ink: Phaser.GameObjects.Graphics) {
-    ink.lineStyle(6, INK, 1);
-    ink.strokeEllipse(762, 308, 40, 56);
-    ink.beginPath();
-    ink.moveTo(745, 319);
-    ink.lineTo(751, 296);
-    ink.lineTo(772, 294);
-    ink.lineTo(784, 314);
-    ink.moveTo(762, 337);
-    ink.lineTo(760, 441);
-    ink.lineTo(738, 486);
-    ink.moveTo(760, 441);
-    ink.lineTo(789, 485);
-    ink.moveTo(760, 368);
-    ink.lineTo(727, 404);
-    ink.lineTo(702, 404);
-    ink.moveTo(760, 368);
-    ink.lineTo(791, 402);
-    ink.lineTo(780, 420);
-    ink.moveTo(702, 404);
-    ink.lineTo(692, 398);
-    ink.moveTo(702, 404);
-    ink.lineTo(691, 412);
-    ink.strokePath();
-  }
-
   private drawShelf(ink: Phaser.GameObjects.Graphics) {
     ink.lineStyle(7, INK, 1);
     ink.strokeRect(385, 164, 250, 342);
@@ -170,6 +132,19 @@ export class BookstoreScene extends Phaser.Scene {
     ink.moveTo(620, 506);
     ink.lineTo(620, 523);
     ink.strokePath();
+  }
+
+  private drawDoor(ink: Phaser.GameObjects.Graphics) {
+    ink.fillStyle(PAPER, 1);
+    ink.fillRect(863, 347, 14, 178);
+    ink.lineStyle(7, INK, 1);
+    ink.beginPath();
+    ink.moveTo(868, 347);
+    ink.lineTo(817, 347);
+    ink.lineTo(817, 523);
+    ink.strokePath();
+    ink.fillStyle(INK, 1);
+    ink.fillCircle(829, 432, 4);
   }
 
   private createBoundaries() {
@@ -225,8 +200,31 @@ export class BookstoreScene extends Phaser.Scene {
         shelfTargetAngle: 0,
         shelfBaseX: 0,
         shelfBoardY: 0,
+        titleScale,
       });
     });
+  }
+
+  private createCharacters() {
+    this.clerk = new PaperCharacter(this, 157, 509, {
+      skin: 0xf1cfb5,
+      clothes: 0xd98979,
+      hair: 0x6f4e47,
+      cheeks: 0xe99b91,
+    }, 1.18);
+    this.clerk.setFacing(1);
+
+    this.visitor = new PaperCharacter(this, 930, 509, {
+      skin: 0xe1b99c,
+      clothes: 0x829fa6,
+      hair: 0x4c5965,
+      cheeks: 0xd98d88,
+    }, 1.18);
+    this.visitor.setFacing(-1);
+    this.visitor.setVisible(false);
+    this.visitor.root.setDepth(6);
+
+    this.checkoutMarks = this.add.graphics().setDepth(8);
   }
 
   private createBookTexture(key: string, color: number) {
@@ -445,6 +443,141 @@ export class BookstoreScene extends Phaser.Scene {
     }
     arrangement[index] = null;
     return arrangement;
+  }
+
+  private updateCharacters(delta: number) {
+    if (this.coverLayer) return;
+    this.customerPhaseTime += delta;
+
+    if (this.customerPhase === 'waiting') {
+      const available = this.shelvedBooks();
+      if (available.length && this.customerPhaseTime > 850) {
+        this.customerTargetId = available[0].data.id;
+        this.customerPhase = 'entering';
+        this.customerPhaseTime = 0;
+        this.visitor.setVisible(true);
+        this.visitor.setPose('walk');
+        this.visitor.setFacing(-1);
+      }
+    } else if (this.customerPhase === 'entering') {
+      if (this.moveVisitorTo(724, 105, delta)) {
+        this.customerPhase = 'searching';
+        this.customerPhaseTime = 0;
+      }
+    } else if (this.customerPhase === 'searching') {
+      let target = this.customerTargetId ? this.books.get(this.customerTargetId) : undefined;
+      if (!target || target.row === null) {
+        target = this.shelvedBooks()[0];
+        this.customerTargetId = target?.data.id ?? null;
+        this.customerPhaseTime = 0;
+      }
+
+      const browseX = this.customerPhaseTime < 700 ? 700 : this.customerPhaseTime < 1400 ? 682 : 696;
+      if (!this.moveVisitorTo(browseX, 38, delta)) {
+        this.visitor.setPose('search');
+        this.visitor.setFacing(-1);
+      }
+
+      if (target && this.customerPhaseTime > 2350) {
+        this.takeBookForCustomer(target);
+        this.customerPhase = 'checkout-walk';
+        this.customerPhaseTime = 0;
+      }
+    } else if (this.customerPhase === 'checkout-walk') {
+      if (this.moveVisitorTo(344, 92, delta)) {
+        this.customerPhase = 'checkout';
+        this.customerPhaseTime = 0;
+        this.visitor.setPose('checkout');
+        this.visitor.setFacing(-1);
+        this.clerk.setPose('checkout');
+      }
+    } else if (this.customerPhase === 'checkout') {
+      this.drawCheckoutMarks();
+      if (this.customerPhaseTime > 1250) {
+        this.customerPhase = 'leaving';
+        this.customerPhaseTime = 0;
+        this.checkoutMarks.clear();
+        this.clerk.setPose('idle');
+        this.visitor.setPose('walk');
+        this.visitor.setFacing(1);
+      }
+    } else if (this.customerPhase === 'leaving') {
+      if (this.moveVisitorTo(930, 112, delta)) {
+        this.customerPhase = 'done';
+        this.visitor.setVisible(false);
+        const book = this.carriedBookId ? this.books.get(this.carriedBookId) : undefined;
+        book?.sprite.setVisible(false);
+        book?.title.setVisible(false);
+        this.carriedBookId = null;
+      }
+    }
+
+    this.clerk.update(delta);
+    this.visitor.update(delta);
+    this.positionCarriedBook();
+  }
+
+  private shelvedBooks() {
+    return [...this.books.values()]
+      .filter(book => book.row !== null)
+      .sort((left, right) => (left.row! - right.row!) || (left.column! - right.column!));
+  }
+
+  private moveVisitorTo(targetX: number, speed: number, delta: number) {
+    const difference = targetX - this.visitor.root.x;
+    if (Math.abs(difference) < 1.5) {
+      this.visitor.setPosition(targetX);
+      return true;
+    }
+    this.visitor.setPose('walk');
+    this.visitor.setFacing(difference < 0 ? -1 : 1);
+    const distance = Math.min(Math.abs(difference), speed * delta / 1000);
+    this.visitor.setPosition(this.visitor.root.x + Math.sign(difference) * distance);
+    return false;
+  }
+
+  private takeBookForCustomer(book: BookVisual) {
+    if (book.row === null) return;
+    const row = book.row;
+    const column = this.shelfRows[row].indexOf(book.data.id);
+    if (column >= 0) this.shelfRows[row][column] = null;
+    book.row = null;
+    book.column = null;
+    this.layoutRow(row);
+
+    this.carriedBookId = book.data.id;
+    book.sprite.disableInteractive();
+    book.sprite.setStatic(true);
+    book.sprite.setIgnoreGravity(true);
+    book.sprite.setVelocity(0, 0);
+    book.sprite.setAngularVelocity(0);
+    book.sprite.setScale(0.62);
+    book.sprite.setDepth(7);
+    book.title.setScale(book.titleScale * 0.62);
+    book.title.setDepth(8);
+    this.visitor.setPose('hold');
+  }
+
+  private positionCarriedBook() {
+    if (!this.carriedBookId) return;
+    const book = this.books.get(this.carriedBookId);
+    if (!book) return;
+    const leaving = this.customerPhase === 'leaving';
+    const direction = leaving ? 1 : -1;
+    book.sprite.setPosition(this.visitor.root.x + direction * 34, this.visitor.root.y - 43);
+    book.sprite.setAngle(direction * 10);
+  }
+
+  private drawCheckoutMarks() {
+    this.checkoutMarks.clear();
+    this.checkoutMarks.fillStyle(0xd5aa55, 1);
+    const count = Math.min(3, Math.floor(this.customerPhaseTime / 280) + 1);
+    for (let index = 0; index < count; index += 1) {
+      const lift = Math.sin(this.customerPhaseTime * 0.006 + index) * 3;
+      this.checkoutMarks.fillCircle(309 + index * 10, 385 - index * 7 + lift, 4);
+      this.checkoutMarks.lineStyle(1.5, INK, 1);
+      this.checkoutMarks.strokeCircle(309 + index * 10, 385 - index * 7 + lift, 4);
+    }
   }
 
   private openCover(book: BookVisual) {

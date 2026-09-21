@@ -7,7 +7,8 @@ Start as a browser game, then package the same renderer with Electron or Tauri o
 - `src/game/types.ts`: plain domain types for books, customers, and shop state.
 - `src/game/catalog.ts`: sample content and authored starting inventory.
 - `src/game/simulation.ts`: pure state transitions for stocking, customer searches, opening, and day changes.
-- `src/scenes/BookstoreScene.ts`: Phaser scene composition, Matter rigid bodies, packed shelf rows, unified mouse/touch input, and cover inspection.
+- `src/scenes/PaperCharacter.ts`: reusable circle-head, triangle-body character renderer with walking, searching, holding, and checkout poses.
+- `src/scenes/BookstoreScene.ts`: Phaser scene composition, Matter rigid bodies, packed shelf rows, unified mouse/touch input, cover inspection, and the current single-customer journey adapter.
 - `src/main.ts`: renderer, physics, and responsive scaling configuration.
 - `src/ui/styles.css`: canvas host sizing only; scene visuals belong in Phaser so every platform uses one coordinate system.
 
@@ -20,8 +21,9 @@ For the next phase, keep one authoritative `GameState` and advance it through ex
 1. Loose books fall, collide, rotate, and settle into a pile as Matter rigid bodies.
 2. Drag a book onto a shelf row to insert it among the packed spines; drag it out again to restore gravity and rigid-body physics.
 3. Double-click or double-tap any book to inspect its front cover, then click the cover close mark or white backdrop to return.
+4. Once a shelf has stock, a customer enters through the open doorway, searches, takes an available book without collapsing the canonical shelf order, carries it to the clerk, pays, and leaves with it. The solid right-wall collider still contains every unpurchased Matter body; only the purchased, character-carried book crosses the doorway.
 
-The pure customer-search and day-state transitions remain in `src/game/simulation.ts`, but the rebuilt scene does not yet connect them to characters. The next gameplay layer should let NPC systems request scene actions through a small adapter instead of putting search logic inside the Phaser scene.
+The journey is an explicit visual state machine so its phases can later be driven by the pure customer-search transitions in `src/game/simulation.ts`. Keep catalog choice, money, and customer intent in the domain layer as the loop grows; keep movement, poses, and scene-object ownership in Phaser.
 
 ## Asset log
 
@@ -36,12 +38,12 @@ Graybox inventory to hand-paint and scan, with geometric or CSS stand-ins until 
 | `prop.register` | Register body, display, drawer | Phaser graybox |
 | `architecture.wall` | Paper wall and room outline | Phaser graybox |
 | `architecture.floor` | Floor line | Phaser graybox |
-| `character.heads` | Clerk and customer head silhouettes | Phaser graybox |
-| `character.bodies` | Clerk and customer body silhouettes | Phaser graybox |
+| `character.heads` | Clerk and customer head silhouettes | Phaser geometric graybox |
+| `character.bodies` | Triangle bodies with stick arms and legs | Phaser geometric graybox |
 | `character.idle` | Customer standing pose | Phaser graybox |
-| `character.walk` | Customer moving between shelf and door | Not built |
-| `character.examine` | Customer holding/reading a book | Not built |
-| `character.checkout` | Cashier scanning a book | Not built |
+| `character.walk` | Customer moving between shelf and door | Phaser graybox |
+| `character.examine` | Customer searching for and holding a book | Phaser graybox |
+| `character.checkout` | Clerk and customer checkout poses | Phaser graybox |
 | `architecture.staircase` | Staircase to upper floor | Not built |
 | `prop.coffee_bar` | Coffee counter, cups, kettle | Not built |
 | `prop.reading_area` | Chair, lamp, side table | Not built |
