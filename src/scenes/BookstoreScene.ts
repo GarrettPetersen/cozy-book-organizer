@@ -403,34 +403,15 @@ export class BookstoreScene extends Phaser.Scene {
   }
 
   private supportedLean(arrangement: Array<string | null>, column: number, id: string) {
-    const gapLeft = column > 0 && arrangement[column - 1] === null;
-    const gapRight = column < SHELF_CAPACITY - 1 && arrangement[column + 1] === null;
-    if (!gapLeft && !gapRight) return 0;
+    const supportLeft = column === 0 || arrangement[column - 1] !== null;
+    const supportRight = column === SHELF_CAPACITY - 1 || arrangement[column + 1] !== null;
+    if (supportLeft === supportRight) return 0;
 
-    const leftLean = gapLeft ? this.supportedLeanMagnitude(arrangement, column, -1) : Number.POSITIVE_INFINITY;
-    const rightLean = gapRight ? this.supportedLeanMagnitude(arrangement, column, 1) : Number.POSITIVE_INFINITY;
-    if (leftLean === rightLean) return this.bookDirection(id) * leftLean;
-    if (leftLean < rightLean) return -leftLean;
-    if (rightLean < leftLean) return rightLean;
-    return 0;
-  }
-
-  private supportedLeanMagnitude(arrangement: Array<string | null>, column: number, direction: -1 | 1) {
-    let gaps = 0;
-    let support = column + direction;
-    while (support >= 0 && support < SHELF_CAPACITY && arrangement[support] === null) {
-      gaps += 1;
-      support += direction;
-    }
-
-    const hasBookSupport = support >= 0 && support < SHELF_CAPACITY;
-    const openWidth = gaps * SHELF_PITCH * (hasBookSupport ? 0.5 : 1);
-    const contactAngle = Phaser.Math.RadToDeg(Math.asin(Math.min(0.97, openWidth / BOOK_WIDTH)));
-    return Math.min(76, Math.max(4, contactAngle));
-  }
-
-  private bookDirection(id: string) {
-    return [...id].reduce((total, character) => total + character.charCodeAt(0), 0) % 2 === 0 ? -1 : 1;
+    const characterSum = [...id].reduce((total, character) => total + character.charCodeAt(0), 0);
+    const standsUnaided = characterSum % 4 === 0;
+    if (standsUnaided) return 0;
+    const lean = 7 + characterSum % 5;
+    return supportLeft ? -lean : lean;
   }
 
   private updateShelfPhysics(delta: number) {
@@ -446,10 +427,14 @@ export class BookstoreScene extends Phaser.Scene {
         book.shelfAngularVelocity = 0;
       }
 
+      const lean = Phaser.Math.DegToRad(book.shelfAngle);
       const angle = Phaser.Math.DegToRad(-90 + book.shelfAngle);
+      const halfWidth = BOOK_WIDTH / 2;
+      const halfThickness = BOOK_HEIGHT / 2;
+      const lowestCorner = Math.abs(Math.sin(angle)) * halfWidth + Math.abs(Math.cos(angle)) * halfThickness;
       book.sprite.setPosition(
-        book.shelfBaseX + Math.cos(angle) * BOOK_WIDTH / 2,
-        book.shelfBoardY + Math.sin(angle) * BOOK_WIDTH / 2,
+        book.shelfBaseX - Math.sin(lean) * halfWidth,
+        book.shelfBoardY - lowestCorner,
       );
       book.sprite.setAngle(-90 + book.shelfAngle);
     });
